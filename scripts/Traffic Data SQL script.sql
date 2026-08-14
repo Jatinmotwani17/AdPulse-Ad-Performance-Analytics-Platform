@@ -2,10 +2,9 @@ CREATE DATABASE IF NOT EXISTS Traffic_project;
 
 USE Traffic_project;
 
-CREATE TABLE Keyword_table (
+CREATE TABLE IF NOT EXISTS website_traffic_data (
     title VARCHAR(250) NOT NULL,
     keyword VARCHAR(250) NOT NULL,
-    keyword_ID INT NOT NULL,
     keyword_ID INT NOT NULL,
     positions INT NOT NULL,
     previous_positions INT NOT NULL,
