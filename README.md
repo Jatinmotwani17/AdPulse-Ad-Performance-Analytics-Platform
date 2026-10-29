@@ -1,10 +1,12 @@
 # AdPulse
 
-Analyze ad campaign data, store it in MySQL, and visualize insights with Power BI.
+Automated ETL pipeline for Google Ads / SEM keyword campaign analytics.
+Loads raw Excel exports → validates & cleans with Python → stores in a normalized MySQL star schema → analyzes with SQL → visualizes in Power BI.
 
 ## What This Project Does
 
 - **Load**: Import raw ad data from Excel
+- **Validate**: Catch data quality issues before they hit the database
 - **Clean**: Process data with Python to remove errors and add IDs
 - **Store**: Load into MySQL database with proper relationships
 - **Analyze**: Run SQL queries for performance insights
@@ -12,340 +14,179 @@ Analyze ad campaign data, store it in MySQL, and visualize insights with Power B
 
 ## Tech Stack
 
-- **Python** - Data cleaning and transformation
-- **MySQL** - Relational database for storing campaign data
-- **Power BI** - Dashboard and visualization
-- **Excel** - Raw data input
-
-## Project Structure
-
-```
-data/
-  raw/              ← Raw Excel/CSV files
-  processed/        ← Clean CSV files after Python processing
-scripts/
-  load_data.py      ← Load and clean data
-  advanced_analytics.sql  ← SQL analysis queries
-  Keyword_Script.ipynb    ← Jupyter notebook for exploration
-dashboard/          ← Power BI dashboard files
-```
+| Layer | Technology |
+|-------|-----------|
+| ETL | Python, Pandas, openpyxl |
+| Validation | Custom validation layer (validate.py) |
+| Database | MySQL (star schema, FK constraints) |
+| Analytics | Advanced SQL (CTEs, subqueries, segmentation) |
+| Visualization | Power BI (DAX measures, star-schema data model) |
+| Testing | pytest, GitHub Actions CI |
 
 ## Quick Start
 
-1. **Load your data**: Place ad performance data in `data/raw/`
-2. **Run Python script**: `python scripts/load_data.py` to clean and process
-3. **Create MySQL tables**: Use SQL scripts to build schema
-4. **Build dashboard**: Import processed CSVs into Power BI
-
-## Questions Answered
-
-- Which keywords drive the most traffic?
-- What's the cost per keyword?
-- How does search volume trend over time?
-- Which campaigns need optimization?
-- Created unique `keyword_ID` values by mapping each keyword to a number.
-- Example (conceptual):
-  ```python
-  df['keyword_ID'] = df['keyword'].astype('category').cat.codes
-  ```
-
-### Step 3: Splitting Clean Tables
-Created three new CSVs:
-- `data/processed/keyword.csv`: Unique list of keywords + IDs.
-- `data/processed/search_volume.csv`: Total volume using `SUMIF`.
-- `data/processed/keyword_difficulty.csv`: Average difficulty using `AVERAGEIF`.
-
-These were calculated using Excel formulas:
-
-| Formula | Purpose |
-|---------|---------|
-| `SUMIF()` | Aggregate total search volume |
-| `AVERAGEIF()` | Compute average difficulty |
-| `IF(B2>=50,"Hard","Moderate")` | Assign difficulty label |
-| `VLOOKUP()` | Lookup keyword metadata |
-
-These tables act as lookup/reference tables for SQL.
-
----
-
-## Lookup and Fact Tables Description
-
-### `keyword`
-This table contains a deduplicated list of all unique keywords with their assigned `keyword_ID`.
-
-| Column Name  | Description |
-|--------------|-------------|
-| `keyword_ID` | Unique identifier for each keyword (used as primary key) |
-| `keyword`    | Actual keyword text, fetched from raw data using `VLOOKUP` |
-
-Created using Excel's `VLOOKUP` function to map keywords with their IDs.
-
-![Excel Lookup Tables](docs/excel_lookup_table_1.png)
-
----
-
-### `search_volume`
-This table includes the total monthly search volume per keyword.
-
-| Column Name     | Description |
-|-----------------|-------------|
-| `keyword_ID`    | Foreign key that links to the `keyword` table |
-| `search_volume` | Monthly search volume, aggregated using Excel's `SUMIF` function |
-
-Created using `SUMIF` to calculate the total search volume for each keyword ID.
-
-![Excel Lookup Tables](docs/excel_lookup_table_3.png)
-
----
-
-### `keyword_difficulty`
-This table stores the average keyword difficulty score along with a difficulty level label.
-
-| Column Name       | Description |
-|-------------------|-------------|
-| `keyword_ID`      | Foreign key linking to the `keyword` table |
-| `avg_difficulty`  | Average difficulty score, calculated using `AVERAGEIF` |
-| `difficulty_level`| Text label derived using Excel's `IF` function (for example, `"Hard"` if >= 50) |
-
-Created using:
-- `AVERAGEIF` to compute average difficulty per `keyword_ID`
-- `IF` to categorize as `"Hard"` or `"Moderate"`
-
-![Excel Lookup Tables](docs/excel_lookup_table_2.png)
-
----
-
-### `website_traffic_data` (Main Fact Table)
-This table holds all enriched campaign performance metrics after processing.
-
-| Column Name            | Description |
-|------------------------|-------------|
-| `title`                | Campaign or landing page title |
-| `keyword`              | Keyword string (linked via `keyword_ID`) |
-| `keyword_ID`           | Foreign key from `keyword`, created using Python |
-| `positions`            | Current average ad position |
-| `previous_positions`   | Previous average position |
-| `last_seen`            | Last recorded impression/click date |
-| `Search_Volume`        | Total monthly searches |
-| `CPC`                  | Cost-per-click (USD) |
-| `Traffic`              | Estimated traffic from the keyword |
-| `Traffic_Percent`      | Percentage of total traffic |
-| `Traffic_Cost`         | Cost attributed to keyword traffic |
-| `Traffic_Cost_Percent` | Percentage of total traffic cost |
-| `Competition`          | Keyword competition score (0-1 scale) |
-| `Number_of_Results`    | Total search engine results for the keyword |
-| `Keyword_difficulty`   | Difficulty value captured in source export |
-
-This is the central fact table, joined with lookup tables to support relational queries and visualizations.
-
-![Main Table](docs/main_table.png)
-
----
-
-## SQL Schema and Relationships
-
-Created a MySQL database:
-
-```sql
-CREATE DATABASE IF NOT EXISTS Traffic_project;
-USE Traffic_project;
-```
-
-### Main Table: `website_traffic_data`
-This is the fact table containing ad performance metrics.
-
-```sql
-CREATE TABLE website_traffic_data (
-    title VARCHAR(250) NOT NULL,
-    keyword VARCHAR(250) NOT NULL,
-    keyword_ID INT NOT NULL,
-    positions INT NOT NULL,
-    previous_positions INT NOT NULL,
-    last_seen DATE NOT NULL,
-    Search_Volume INT NOT NULL,
-    CPC DECIMAL(10,2) NOT NULL,
-    Traffic INT NOT NULL,
-    Traffic_Percent DECIMAL(10,2) NOT NULL,
-    Traffic_Cost INT NOT NULL,
-    Traffic_Cost_Percent DECIMAL(10,2) NOT NULL,
-    Competition DECIMAL(10,2) NOT NULL,
-    Number_of_Results INT NOT NULL,
-    Keyword_difficulty INT NOT NULL
-);
-```
-
-### Schema Screenshot
-
-![Schema Screenshot](docs/mysql_schema_editor.png)
-
-### Keys and Normalization
-
-Imported the other CSVs into MySQL:
-- `keyword`
-- `search_volume`
-- `keyword_difficulty`
-
-Then established relational integrity:
-
-```sql
-ALTER TABLE website_traffic_data
-ADD FOREIGN KEY (keyword_ID) REFERENCES keyword(keyword_ID);
-```
-
-These keys ensure consistent data joins between tables.
-
----
-
-## Relationship Diagram (EER)
-
-![EER Diagram](docs/EER_Diagram.png)
-
-These diagrams visualize the relationships between:
-- Keywords -> Traffic Data
-- Keyword Difficulty -> Traffic Data
-- Search Volume -> Traffic Data
-
----
-
-## Power BI Dashboard
-
-Connected Power BI to the MySQL database and created an interactive dashboard.
-
-### Visual Elements
-- Cards: Total Traffic, Search Volume, Cost, Results
-- Line Chart: Traffic over time
-- Bar Chart: Traffic by Keyword
-- Treemap: Search Volume by Keyword
-- Pie/Donut: Traffic by Difficulty, by Month
-- Slicers: Year, Quarter, Keyword filter
-
-![Power BI Dashboard](docs/power_bi_dashboard.png)
-
-### DAX Measures
-
-```DAX
-Average CPC = AVERAGE(website_traffic_data[CPC])
-Last Date = MAX('website_traffic_data'[last_seen])
-Start Date = MIN('website_traffic_data'[last_seen])
-Total Results = SUM(website_traffic_data[Number_of_Results])
-Total Search Volume = SUM(website_traffic_data[Search_Volume])
-Total Traffic = SUM('website_traffic_data'[Traffic])
-Total Traffic Cost = SUM(website_traffic_data[Traffic_Cost])
-Traffic Percent = AVERAGE(website_traffic_data[Traffic_Percent])
-
-Calender = CALENDAR([Start Date],[Last Date])
-Months = FORMAT(Calender[Date],"MMMM")
-Quarter = QUARTER(Calender[Date])
-Year = YEAR(Calender[Date])
-Year and QTR = 'Calender'[Year] & " QTR " & 'Calender'[Quarter]
-```
-
-These measures enable filtering, aggregation, and time-based visualizations.
-
----
-
-## Power BI Data Model View
-
-To enable seamless slicing and aggregation, a clean star schema was created in Power BI.
-
-### Relationships
-- Fact: `website_traffic_data`
-- Dimensions:
-  - `keyword` (via `keyword_ID`)
-  - `keyword_difficulty`
-  - `search_volume`
-
-This model ensures accurate filtering and joins.
-
-![Power BI Data Model](docs/powerbi_data_model.png)
-
----
-
-## Advanced Analytics
-
-The file `scripts/advanced_analytics.sql` contains 8 business-focused SQL queries that support practical optimization decisions:
-
-1. Top 10 traffic-to-cost efficient keywords: identifies where spend converts into traffic most effectively.
-2. Position improvement tracking: highlights keywords improving in rank versus previous snapshots.
-3. CPC tier segmentation: compares low/medium/high CPC segments by keyword count and average traffic.
-4. Monthly trend reporting: tracks total traffic, spend, and average CPC by month.
-5. Missed opportunity keywords: finds above-average search volume keywords with below-average traffic.
-6. Difficulty vs performance analysis: benchmarks traffic and CPC across difficulty levels.
-7. Top cost drivers: surfaces top 5 expensive keywords with latest position and difficulty context.
-8. Competition bucket analysis: compares low/medium/high competition bands on traffic and CPC.
-
-These queries are designed for campaign budget planning, rank optimization, and creative prioritization with marketing stakeholders.
-
----
-
-## How to Use This Project
-
-### 1. Clone the Repo
-
-
-
-### 2. Install Dependencies
+### 1. Clone & Install
 
 ```bash
+git clone <repo-url>
+cd AdPulse
 pip install -r requirements.txt
 ```
 
-### 3. Review Source Data
-- Raw file: `data/raw/Raw_data.xlsx`
-- Processed CSV files: `data/processed/`
-
-### 4. Set Up MySQL and Load Data Automatically
-- Update credentials in `scripts/load_data.py` (or map from your `.env` values).
-- Run:
+### 2. Configure MySQL Credentials
 
 ```bash
-python scripts/load_data.py
+cp .env.example .env
+# Edit .env and fill in your MySQL credentials
 ```
 
-### 5. Run Advanced SQL Analytics
-- Open MySQL client and run:
+### 3. Prepare & Load Data
+
+```bash
+python scripts/prepare_processed_csvs.py   # scaled Excel -> data/processed/*.csv
+python scripts/load_data.py                # validate + load into MySQL
+```
+
+The first command builds the four processed CSVs (fact + dimension tables) from `Raw_data_scaled.xlsx`, assigning keyword IDs and normalizing dates. The second validates before loading — if validation fails, it prints exactly what's wrong and exits without touching the database.
+
+### 4. Run Tests
+
+```bash
+pytest tests/ -v
+```
+
+### 5. Run SQL Analytics
+
+Open MySQL client and run:
 
 ```sql
 SOURCE scripts/advanced_analytics.sql;
 ```
 
 ### 6. Open Power BI Dashboard
+
 - File: `dashboard/Traffic Project dashboard.pbix`
 - Or connect manually via: `Home -> Get Data -> MySQL`
 
----
+## Dataset
 
-## Repository Structure
+| File | Rows | Description |
+|------|------|-------------|
+| `data/raw/Raw_data.xlsx` | 199 | Original real SEM export (do not modify) |
+| `data/raw/Raw_data_scaled.xlsx` | 25,199 | 199 real + ~25,000 synthetic rows |
 
-```text
-ad-performance-analytics/
-|-- data/
-|   |-- raw/
-|   |   |-- Raw_data.xlsx
-|   |-- processed/
-|       |-- website_traffic_data.csv
-|       |-- keyword.csv
-|       |-- keyword_difficulty.csv
-|       |-- search_volume.csv
-|-- scripts/
-|   |-- __init__.py
-|   |-- load_data.py
-|   |-- Keyword_Script.ipynb
-|   |-- advanced_analytics.sql
-|   |-- Traffic Data SQL script.sql
-|-- dashboard/
-|   |-- Traffic Project dashboard.pbix
-|-- docs/
-|   |-- raw_excel_sample.png
-|   |-- excel_lookup_table_1.png
-|   |-- excel_lookup_table_2.png
-|   |-- excel_lookup_table_3.png
-|   |-- main_table.png
-|   |-- mysql_schema_editor.png
-|   |-- EER_Diagram.png
-|   |-- power_bi_dashboard.png
-|   |-- powerbi_data_model.png
-|-- .env.example
-|-- requirements.txt
-|-- README.md
+**Synthetic data is calibrated to real statistics** — the generation script (`scripts/generate_synthetic_data.py`) profiles the real 199 rows' CPC distribution (lognormal fit), search volume (power-law sampling), keyword difficulty, and competition values, then generates synthetic rows by sampling from those fitted distributions.
+
+**Traffic follows a per-keyword trend + noise model** — rather than assigning traffic independently per row (which would produce no temporal signal), each keyword gets a coherent trend across the 12-month span: a base traffic level plus a per-keyword linear drift (some trending up, some down, some flat) with +/- 15-35% monthly noise on top. This gives the forecasting model a real signal to learn, while the noise keeps it from being perfectly predictable.
+
+The synthetic data extends the same certification-course domain (PMP, CSM, ITIL, Six Sigma, AWS, Azure, etc.) across 2,000 unique keywords and a 12-month date range. All documentation and discussions clearly identify this as synthetic data — never claim it is real.
+
+To regenerate: `python scripts/generate_synthetic_data.py`
+
+The processed CSVs in `data/processed/` are derived from the scaled dataset — regenerate them with `python scripts/prepare_processed_csvs.py` before loading into MySQL (the Jupyter notebook produced them once from the 199-row original; the script now rebuilds them from any raw Excel source).
+
+## Project Structure
+
 ```
+AdPulse/
+├── data/
+│   ├── raw/                    ← Raw Excel/CSV files
+│   │   ├── Raw_data.xlsx           ← Original real data (199 rows)
+│   │   └── Raw_data_scaled.xlsx    ← Scaled dataset (25,199 rows)
+│   └── processed/              ← Clean CSV files after processing
+│       ├── website_traffic_data.csv
+│       ├── keyword.csv
+│       ├── keyword_difficulty.csv
+│       └── search_volume.csv
+├── scripts/
+│   ├── load_data.py                ← ETL: loads CSVs into MySQL
+│   ├── generate_synthetic_data.py  ← Generates scaled dataset
+│   ├── prepare_processed_csvs.py   ← Builds processed CSVs from scaled Excel
+│   ├── advanced_analytics.sql      ← 8 SQL analysis queries
+│   ├── Traffic Data SQL script.sql
+│   └── Keyword_Script.ipynb        ← Jupyter notebook for exploration
+├── dashboard/
+│   └── Traffic Project dashboard.pbix
+├── tests/
+│   └── test_validate.py        ← Unit tests for data validation
+├── docs/                       ← Schema diagrams & screenshots
+├── .env.example                ← Template for MySQL credentials
+├── .gitignore                  ← Excludes .env, __pycache__, etc.
+├── validate.py                 ← Data validation layer
+├── requirements.txt
+└── README.md
+```
+
+## Data Validation
+
+Before loading data into MySQL, the pipeline runs `validate.py` which checks for:
+
+| Check | Severity | Blocks Load? |
+|-------|----------|-------------|
+| Required columns exist | Critical | ✅ Yes |
+| No null keywords | Warning | ❌ No |
+| No duplicate keywords | Warning | ❌ No |
+| CPC in valid range [0, 1000] | Critical | ✅ Yes |
+| Search Volume non-negative | Critical | ✅ Yes |
+| Position in range [1, 100] | Warning | ❌ No |
+
+This catches corrupted rows, missing values, and out-of-range data **before** they reach the database.
+
+## Star Schema
+
+```
+keyword (dimension)  ──────┐
+                           ├── website_traffic_data (fact table)
+search_volume (dimension) ─┤
+                           │
+keyword_difficulty (dim) ──┘
+```
+
+- **Fact table**: 15 columns — title, keyword, position, CPC, traffic, cost, competition, difficulty
+- **Dimension tables**: keyword, search_volume, keyword_difficulty — linked via `keyword_ID` (FK)
+
+## SQL Analytics (8 Queries)
+
+1. Top 10 traffic-to-cost efficient keywords
+2. Position improvement tracking
+3. CPC tier segmentation (low/medium/high)
+4. Monthly traffic trend
+5. Missed opportunity keywords (high volume, low traffic)
+6. Difficulty vs performance analysis
+7. Top 5 most expensive keywords
+8. Competition bucket analysis
+
+## CI/CD
+
+GitHub Actions runs `pytest tests/ -v` on every push and PR to `main`.
+See `.github/workflows/test.yml` for the full workflow.
+
+## Anomaly Detection
+
+Flags CPC spikes/drops and traffic anomalies per keyword using a per-keyword z-score approach:
+
+1. Computes each keyword's own historical mean and standard deviation for CPC and Traffic
+2. Flags any data point beyond 2 standard deviations from that keyword's own baseline
+3. Classifies anomalies as: CPC_SPIKE, CPC_DROP, TRAFFIC_DROP, TRAFFIC_SPIKE
+
+```bash
+python anomaly_detection.py            # MySQL mode
+python anomaly_detection.py --csv      # CSV fallback mode
+```
+
+Results stored in: `detected_anomalies` table (MySQL) or printed to console.
+
+## Traffic Forecasting
+
+Predicts next-month traffic per keyword using linear regression trained on each keyword's historical monthly average traffic (minimum 6 months of history required). Evaluated via holdout testing: the most recent month is never used in training, only for measuring prediction accuracy.
+
+Metric: Mean Absolute Error (MAE) — average absolute difference between predicted and actual traffic, in the same units as traffic itself.
+
+```bash
+python forecasting.py            # MySQL mode
+python forecasting.py --csv      # CSV fallback mode
+```
+
+Results stored in: `traffic_forecasts` table (MySQL) or printed to console.
+
+If no keyword has at least `--min-months` (default 6) distinct months of history, the script exits gracefully with a warning instead of computing metrics on empty data.
